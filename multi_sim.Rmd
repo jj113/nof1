@@ -1,0 +1,433 @@
+---
+title: "n-of-1"
+output: pdf_document
+date: '2022-11-20'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## **1. Loading required packages**
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+
+library(binom)
+library(MASS)
+library(ldbounds)
+library(foreach)
+library(doParallel)
+```
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+
+source("./est_fun.R") # Load the main function for estimation in n-of-1
+
+```
+
+## **2. setting simulation parameters**
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+set.seed(2022)
+
+p = c(0, 0, 1) 
+
+gamma = 0
+
+idx.p = which(p == max(p))
+if(idx.p == 1){test.hyp = -1}
+if(idx.p == 2){test.hyp = 0}
+if(idx.p == 3){test.hyp = 1}
+
+sig = 1
+abs_delta = 1.35
+mu = T_ent = 2.5  
+power = 0.8
+alpha = 0.05
+
+nsim = 1000
+
+kn = 10 # for simulation
+```
+
+
+## **call function to estimate Pa and P.inconclusive**
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+if(test.hyp == 0){
+  pa = p1 = pba = p[2]
+}else if(test.hyp == 1){
+  pa = p1 = pba = p[3]
+}else{
+  pa = p1 = pba = p[1]
+}
+
+# give the p0 for the simulation
+p0 = gamma_glb = 1/3
+
+source("./Pa_Pinconclu_est.R") # Load the main function for estimation in n-of-1
+
+est.table = table(stop_for)
+
+p.inconc = 0
+if(gamma == 0){
+  idx.f = which(row.names(est.table) == '4')
+  p.inconc = p.inconc + est.table[idx.f]/length(class.save)
+  
+  if(test.hyp == 0){
+    inconc = c(length(B4), length(E4), length(A4))
+    idx.tot = which(row.names(table(class.save))=='0')
+    pinconc.ba = inconc[2]/table(class.save)[idx.tot]
+  }
+  
+  if(test.hyp == 1){
+    inconc = c(length(B4), length(E4), length(A4))
+    idx.tot = which(row.names(table(class.save))=='1')
+    pinconc.ba = inconc[3]/table(class.save)[idx.tot]
+  }
+  
+  if(test.hyp == -1){
+    inconc = c(length(B4), length(E4), length(A4))
+    idx.tot = which(row.names(table(class.save))=='-1')
+    pinconc.ba = inconc[1]/table(class.save)[idx.tot]
+  }
+}else{
+  idx.f = which(row.names(est.table) == '4')
+  p.inconc = p.inconc + est.table[idx.f]/length(class.save)
+  
+  idx.f = which(row.names(est.table) == '100')
+  p.inconc = p.inconc + est.table[idx.f]/length(class.save)
+  
+  if(test.hyp == 0){
+    inconc = c(length(B4), length(E4), length(A4))
+    idx = which(row.names(table(compare[wrong,])) == '0')
+    idx100 = dim((table(compare[wrong,])))[2] 
+    idx.tot = which(row.names(table(class.save))=='0')
+    pinconc.ba = (table(compare[wrong,])[idx, idx100, 1] + inconc[2])/table(class.save)[idx.tot]
+  }
+  
+  if(test.hyp == 1){
+    inconc = c(length(B4), length(E4), length(A4))
+    idx = which(row.names(table(compare[wrong,])) == '1')
+    idx100 = dim((table(compare[wrong,])))[2] 
+    idx.tot = which(row.names(table(class.save))=='1')
+    pinconc.ba = (table(compare[wrong,])[idx, idx100, 1] + inconc[3])/table(class.save)[idx.tot]
+  }
+  
+  if(test.hyp == -1){
+    inconc = c(length(B4), length(E4), length(A4))
+    idx = which(row.names(table(compare[wrong,])) == '-1')
+    idx100 = dim((table(compare[wrong,])))[2] 
+    idx.tot = which(row.names(table(class.save))=='-1')
+    pinconc.ba = (table(compare[wrong,])[idx, idx100, 1] + inconc[1])/table(class.save)[idx.tot]
+  }
+}
+
+pa = round(as.numeric((1-pinconc.ba)*pba/(1-p.inconc)), 2)
+
+```
+
+## **3. estimate number individuals**
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+n_pre = 1
+success = F
+while(success == F){
+  dummy = c(0:n_pre)
+  ind1 = c()
+  for(i in 1:length(dummy)){
+    ind1[i] = dbinom(dummy[i], size = n_pre, prob = p0)
+  }
+  
+  cum = cumsum(ind1)
+  w = min(which(cum > (1-0.05)))
+  
+  if(!is.infinite(w)){
+    y = c(0:dummy[w])
+    
+    ind = c()
+    for(i in 1:length(y)){
+      ind[i] = dbinom(y[i], size = n_pre, prob = pa)
+    }
+    cat("power:")
+    print(1-sum(ind))
+    
+    if( (1 - sum(ind)) < (power)){
+      success = F
+      n_pre = n_pre + 1
+    }else{
+      success = T
+      break
+    }
+  }else{
+    success = F
+    n_pre = n_pre + 1
+  }
+}
+
+w = dummy[w]
+n = ceiling(n_pre/(1-p.inconc))
+```
+
+
+## **4. simulate data**
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+k = rep(kn, n)
+
+Tmean = list()
+for(i in 1:nsim){
+  Tmean[[i]] = rmultinom(n, 1, p)
+}
+
+TT = matrix(0, nrow = nsim, ncol = n)
+class.save = matrix(0, nrow = nsim, ncol = n)
+
+for(i in 1:nsim){
+  for(nn in 1:n){
+    class = which( Tmean[[i]][,nn] != 0)
+    if(class == 1){
+      TT[i,nn] = -T_ent
+      class.save[i, nn] = -1
+    }
+    if(class == 2){
+      TT[i,nn] = 0
+      class.save[i, nn] = 0
+    }
+    if(class == 3){
+      TT[i,nn] = T_ent
+      class.save[i, nn] = 1
+    }
+  }
+  
+}
+
+entry = list()
+c_time_list = list()
+for(j in 1:nsim){
+  entry[[j]] = seq(0, 2000, length.out = n)
+  c_time = list()
+  for(i in 1:n){
+    t = rep((2 + 0.5), (k[i] - 1))
+    c_time[[i]] = cumsum(c((entry[[j]][i] + 2), t))
+  }
+  c_time_list[[j]] = c_time
+}
+
+interim = length(c_time_list[[1]][[1]] - 1)
+
+ZZk = ldBounds(t = (2:(kn))/(kn), t2 = (2:(kn))/(kn), 
+               iuse = 1, alpha = 0.05, sides = 1)$upper.bounds
+ZZk = ZZk[length(ZZk)]
+z_value = ZZk*sqrt(kn/c(1:kn))
+```
+
+
+## **5. run simulation loop**
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+workers = 10
+
+cl <- makeCluster(workers) 
+
+registerDoParallel(cl)
+
+out <- foreach(i=1:nsim) %dopar%{
+run = myfun(power, alpha, method = "OBF", abs_delta = abs_delta, gamma = gamma, TT = TT[i,], k = k, n = n, n_pre = n_pre, entry = entry[[i]], c_time = c_time_list[[i]], z_value = z_value, class.save.in = class.save[i,], pstar = 1)
+
+  run
+}
+
+stopCluster(cl)
+
+all = do.call(cbind, out)
+stop_for = do.call(rbind, all[1,])
+stop_glb = unlist(all[2,])
+stop_slot = do.call(rbind, all[3,])
+bin_check = do.call(rbind, all[4,])
+
+```
+
+## **6. organize results**
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+
+rm.ind = which(as.numeric(stop_for) == 999)
+
+if(length(rm.ind)==0){
+  rm.TT = as.numeric(class.save)
+  stop_for = stop_for
+}else{
+  rm.TT = as.numeric(class.save)[-rm.ind]
+  stop_for = stop_for[-as.numeric(rm.ind)]
+}
+
+bin = ifelse(as.numeric(stop_for) == as.numeric(rm.TT), 1, 0 )
+
+who_rm = as.numeric(TT)[rm.ind]
+compare = data.frame(truth = rm.TT, stop_for = as.numeric(stop_for), 
+                     decision = as.numeric(bin))
+
+
+wrong = A4 = B4 = E4 = NULL
+for(i in 1:nrow(compare)){
+  if(compare[i,]$stop_for != 4 && compare[i,]$decision == 0){
+    wrong = c(wrong, i)
+  }
+  if(compare[i,]$stop_for == 4 && compare[i,]$decision == 0){
+    if(compare[i,]$truth == 1){
+      A4 = c(A4, i)
+    }
+    if(compare[i,]$truth == -1){
+      B4 = c(B4, i)
+    }
+    if(compare[i,]$truth == 0){
+      E4 = c(E4, i)
+    }
+  }
+}
+
+```
+
+## **7. results**
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+count.tab = table(rm.TT)
+catg = row.names(count.tab)
+idx_1 = which(catg == '-1')
+idx0 = which(catg == '0')
+idx1 = which(catg == '1')
+
+if('-1' %in% catg){B4.tot = count.tab[idx_1]}else{B4.tot = 0} # -1
+if('0' %in% catg){E4.tot = count.tab[idx0]}else{E4.tot = 0} # 0
+if('1' %in% catg){A4.tot = count.tab[idx1]}else{A4.tot = 0} # 1
+
+idx4 = which(row.names(table(stop_for)) == '4')
+
+if('100' %in% row.names(table(stop_for))){
+  idx100 = which(row.names(table(stop_for)) == '100')
+}
+
+cond = which(p != 0) 
+
+indv.cor = 0
+
+if(p[2] != 0){
+  idx.i0 = which(row.names(table(stop_for)) == '0')
+  idx.w = which(colnames(table(compare[wrong,]))=='0')
+  
+  c0 = 0
+  for(cn in 1:length(row.names(table(compare[wrong,])))){
+    c0 = c0 + table(compare[wrong,])[cn, idx.w, 1]
+  }
+  
+  if(length(c0)==0){
+    indv.cor = indv.cor + (table(stop_for)[idx.i0])
+  }else{
+    indv.cor = indv.cor + (table(stop_for)[idx.i0] - c0)
+  }
+  
+  false.sup = 0 
+  if('-1' %in% colnames(table(compare[wrong,]))){
+      idx.i_1 = which(colnames(table(compare[wrong,])) == '-1')
+      idx.i0 = which(row.names(table(compare[wrong,])) == '0')
+
+      false.sup = false.sup + table(compare[wrong,])[idx.i0, idx.i_1, 1]
+  }
+  if('1' %in% colnames(table(compare[wrong,]))){
+      idx.i1 = which(colnames(table(compare[wrong,])) == '1')
+      idx.i0 = which(row.names(table(compare[wrong,])) == '0')
+            
+      false.sup = false.sup + table(compare[wrong,])[idx.i0, idx.i1, 1]
+  }
+  
+  idx100 = which(colnames(table(compare[wrong,]))=='100')
+ 
+}
+
+if(p[3] != 0){
+  idx.i1 = which(row.names(table(stop_for)) == '1')
+  idx.w = which(colnames(table(compare[wrong,]))=='1')
+  
+  c0 = 0
+  for(cn in 1:length(row.names(table(compare[wrong,])))){
+    c0 = c0 + table(compare[wrong,])[cn, idx.w, 1]
+  }
+  
+  if(length(c0)>0){
+    indv.cor = indv.cor + (table(stop_for)[idx.i1] - c0)
+  }else{
+   indv.cor = indv.cor + (table(stop_for)[idx.i1])
+  }
+ 
+ false.sup = 0 
+  if('-1' %in% colnames(table(compare[wrong,]))){
+      idx.i_1 = which(colnames(table(compare[wrong,])) == '-1')
+      idx.i1 = which(row.names(table(compare[wrong,])) == '1')
+      
+      false.sup = false.sup + table(compare[wrong,])[idx.i1, idx.i_1, 1]
+  }
+  false.eqv = 0 
+  if('0' %in% colnames(table(compare[wrong,]))){
+      idx.i0 = which(colnames(table(compare[wrong,])) == '0')
+      idx.i1 = which(row.names(table(compare[wrong,])) == '1')
+      
+      false.eqv = false.eqv + table(compare[wrong,])[idx.i1, idx.i0, 1]
+  }
+  
+    idx100 = which(colnames(table(compare[wrong,]))=='100')
+}
+
+if(p[1] != 0){
+  idx.i_1 = which(row.names(table(stop_for)) == '-1')
+  idx.w = which(colnames(table(compare[wrong,]))=='-1')
+  
+  c0 = 0
+  for(cn in 1:length(row.names(table(compare[wrong,])))){
+    c0 = c0 + table(compare[wrong,])[cn, idx.w, 1]
+  }
+  
+ if(length(c0)>0){
+    indv.cor = indv.cor + (table(stop_for)[idx.i_1] - c0)
+  }else{
+    indv.cor = indv.cor + (table(stop_for)[idx.i_1])
+  }
+
+ false.sup = 0 # false superiority
+  if('1' %in% colnames(table(compare[wrong,]))){
+      idx.i1 = which(colnames(table(compare[wrong,])) == '1')
+      idx.i_1 = which(row.names(table(compare[wrong,])) == '-1')
+
+      false.sup = false.sup + table(compare[wrong,])[idx.i_1, idx.i1, 1]
+  }
+  false.eqv = 0 # false superiority
+  if('0' %in% colnames(table(compare[wrong,]))){
+      idx.i0 = which(colnames(table(compare[wrong,])) == '0')
+      idx.i_1 = which(row.names(table(compare[wrong,])) == '-1')
+      
+      false.eqv = false.eqv + table(compare[wrong,])[idx.i_1, idx.i0, 1]
+  }
+  
+  idx100 = which(colnames(table(compare[wrong,]))=='100')
+  
+}
+
+
+
+n-length(who_rm)/length(TT)*n
+
+table_fun <- function(row){
+  table(factor(row, levels = 1:interim))
+}
+
+table_n = apply(stop_slot, 1, table_fun)
+table_n = apply(table_n, 1, sum)
+sum(c(1:interim)*(c(table_n[1:(interim-1)], (length(rm.TT))-sum(table_n[1:(interim-1)]))/(length(rm.TT))))
+
+
+```
+
+```{r eval=TRUE, include=TRUE, warning=FALSE}
+#end
+```
+
